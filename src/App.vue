@@ -101,7 +101,6 @@ const handleManualSeekInput = () => {
 const handleManualSeek = (event: Event) => {
   event.preventDefault();
   const timeString = manualSeekTime.value;
-  console.log(timeString)
   if (!audioRef.value) return
   const timeRegex = /^(\d{2}):(\d{2}):(\d{2})$/g;
   if (timeString.match(timeRegex)) {
@@ -127,7 +126,6 @@ const handleAudioFileInput = (event: Event) => {
   if (!file) return
   audioFileName.value = file.name;
   audioSrc.value = URL.createObjectURL(file)
-  //audioRef.value.src = URL.createObjectURL(file);
 }
 
 const handleSrtFileInput = (event: Event) => {
