@@ -1,18 +1,22 @@
 <script setup lang="ts">
-import { onMounted, ref, useTemplateRef } from 'vue';
-import { useDraggable } from '@vueuse/core'
+import { onMounted, ref, useTemplateRef, onUnmounted } from 'vue';
+import { useDraggable, useScroll, useElementVisibility } from '@vueuse/core'
 
 type Subtitle = {
   start: number;
   end: number;
-  text: string;
+  text: string[];
 };
 
 type SubtitleList = (Subtitle | undefined)[];
 
 const audioRef = ref<HTMLAudioElement | null>(null);
 const subtitleRef = useTemplateRef<HTMLElement>('subtitleRef');
-const currentSubtitle = ref('');
+const subtitleOverflowRef = useTemplateRef<HTMLElement>('subtitleOverflowRef');
+const { isScrolling } = useScroll(subtitleOverflowRef);
+const activeRef = ref(null);
+const isVisible = useElementVisibility(activeRef);
+const currentSubtitle = ref<string[]>([]);
 const playState = ref(false);
 const currentProgress = ref('0')
 const cues = ref<SubtitleList>([]);
@@ -21,6 +25,7 @@ const audioFileName = ref<string>("");
 const srtFileName = ref<string>("");
 const manualSeekTime = ref<string>('');
 const isInvalid = ref(false);
+const activeSubtitleIndex = ref(0);
 
 const { style } = useDraggable(subtitleRef, {
   //@ts-expect-error: x position not initially passed in, as the position of the subtitle to be
@@ -37,7 +42,7 @@ function parseSubtitles(srtText: string) {
       return {
         start: toSeconds(time[0]),
         end: toSeconds(time[1]),
-        text: lines.slice(2).join(" ")  // Combine multiline subtitles
+        text: lines.slice(2)  // Combine multiline subtitles
       };
     }
   }).filter(Boolean);
@@ -71,9 +76,25 @@ onMounted(async () => {
       const duration = audio.duration;
       const cue = cues.value.filter((cue) => cue !== undefined).find(cue => time >= cue.start && time <= cue.end);
       currentProgress.value = `${(time / duration) * 1000}`;
-      currentSubtitle.value = cue ? cue.text : '';
+      currentSubtitle.value = cue ? cue.text : [];
+      activeSubtitleIndex.value = cue ? cues.value.indexOf(cue) : activeSubtitleIndex.value;
+
+      if (playState.value && !isScrolling.value && isVisible.value) {
+        centerizeSubtitle()
+      }
     });
   }
+  document.addEventListener('keydown', handleKeyDown);
+});
+const handleKeyDown = (event: KeyboardEvent) => {
+  if (event.code === 'Space') {
+    event.preventDefault(); // Prevent default spacebar behavior (scrolling)
+    togglePlay();
+  }
+};
+
+onUnmounted(() => {
+  document.removeEventListener('keydown', handleKeyDown);
 });
 const togglePlay = () => {
   if (audioRef.value) {
@@ -92,7 +113,9 @@ const seek = (event: Event) => {
   const duration = audioRef.value.duration;
   const time = (Number(progress) / 1000) * duration;
   audioRef.value.currentTime = time;
+  centerizeSubtitle();
 }
+
 
 const handleManualSeekInput = () => {
   isInvalid.value = false
@@ -135,7 +158,7 @@ const handleSrtFileInput = (event: Event) => {
   loadSubtitles(URL.createObjectURL(file))
   srtFileName.value = file.name;
 }
-const handleAudioEnded = (event: Event) => {
+const handleAudioEnded = () => {
   if (audioRef.value) {
     const audio = audioRef.value;
     audio.currentTime = 0;
@@ -143,57 +166,131 @@ const handleAudioEnded = (event: Event) => {
     playState.value = false
   }
 }
+
+const centerizeSubtitle = () => {
+  const activeSubtitle = document.getElementsByClassName('active-subtitle')[0]
+  if (activeSubtitle) {
+    activeSubtitle.scrollIntoView({
+      behavior: 'smooth',
+      block: 'center',
+
+    })
+  }
+}
+const seekSubtitle = async (subtitle: Subtitle) => {
+  const index = cues.value.indexOf(subtitle);
+  if (audioRef.value) {
+    audioRef.value.currentTime = subtitle.start;
+    const setSubtitlePromise = new Promise((resolve) => {
+      activeSubtitleIndex.value = index;
+      resolve(true)
+    })
+    await setSubtitlePromise;
+    centerizeSubtitle();
+  }
+}
+const setActiveRef = (el: HTMLElement) => {
+  activeRef.value = el;
+}
 </script>
 
 <template>
   <div class="container">
-    <h1>Mp3 audio file and SRT debugger</h1>
-    <audio ref="audioRef" :src="audioSrc" @ended="handleAudioEnded"></audio>
-    <button :disabled="!audioSrc" @click="togglePlay">{{ playState ? 'Pause' : 'Play' }}</button>
-    <div class="input-container">
-      <div>
-        <input type="file" accept="audio/*" class="audio-input" id="audio-input" @change="handleAudioFileInput" />
-        <label class="audio-input-label" for="audio-input">Load MP3 file</label>
-        <div v-if="audioFileName">{{ audioFileName }}</div>
+    {{ activeSubtitleIndex }}
+    <div class="sub-container">
+      <h1>Mp3 audio file and SRT debugger</h1>
+      <audio ref="audioRef" :src="audioSrc" @ended="handleAudioEnded"></audio>
+      <button :disabled="!audioSrc" @click="togglePlay">{{ playState ? 'Pause' : 'Play' }}</button>
+      <div class="input-container">
+        <div>
+          <input type="file" accept="audio/*" class="audio-input" id="audio-input" @change="handleAudioFileInput" />
+          <label class="audio-input-label" for="audio-input">Load MP3 file</label>
+          <div v-if="audioFileName">{{ audioFileName }}</div>
+        </div>
+        <div>
+          <input type="file" accept=".srt" class="srt-input" id="srt-input" @change="handleSrtFileInput" />
+          <label class="audio-input-label" for="srt-input">Load SRT file</label>
+          <div v-if="srtFileName">{{ srtFileName }}</div>
+        </div>
+      </div>
+      <div class="seek-bar-container">
+        <span>{{ audioRef?.currentTime ? formatTime(audioRef.currentTime) : '00:00:00' }}</span>
+        <input :disabled="!audioSrc" class="progress-bar" type="range" min="0" max="1000" @input="seek"
+          :value="currentProgress" />
+        <span>{{ audioRef?.duration ? formatTime(audioRef.duration) : '00:00:00' }}</span>
       </div>
       <div>
-        <input type="file" accept=".srt" class="srt-input" id="srt-input" @change="handleSrtFileInput" />
-        <label class="audio-input-label" for="srt-input">Load SRT file</label>
-        <div v-if="srtFileName">{{ srtFileName }}</div>
+        <label>Manual seek</label>
+        <form @submit="handleManualSeek">
+          <fieldset role="group">
+            <input v-model="manualSeekTime" name="seekTime" type="text" placeholder="00:00:00"
+              v-bind="isInvalid ? { 'aria-invalid': true } : {}" @input="handleManualSeekInput" />
+            <input type="submit" value="Seek" />
+          </fieldset>
+        </form>
+      </div>
+      <div ref="subtitleRef" class="subtitle-container"
+        :style="[style, { 'display': currentSubtitle.length > 0 ? 'block' : 'none' }]">
+        <p class="subtitle" v-for="subtitle in currentSubtitle" :key="subtitle">{{ subtitle }}</p>
       </div>
     </div>
-    <div class="seek-bar-container">
-      <span>{{ audioRef?.currentTime ? formatTime(audioRef.currentTime) : '00:00:00' }}</span>
-      <input :disabled="!audioSrc" class="progress-bar" type="range" min="0" max="1000" @input="seek"
-        :value="currentProgress" />
-      <span>{{ audioRef?.duration ? formatTime(audioRef.duration) : '00:00:00' }}</span>
+    <div class="sub-container overflow-subtitle-container" ref="subtitleOverflowRef">
+      <div class="overflow-subtitle" v-for="(subtitle, index) in cues" :key="subtitle" @click="seekSubtitle(subtitle)"
+        :ref="index === activeSubtitleIndex ? setActiveRef : null">
+        <p :class="{ 'active-subtitle': index == activeSubtitleIndex }" v-for="text in subtitle.text" :key="text"> {{
+          text }}</p>
+      </div>
     </div>
-    <div>
-      <label>Manual seek</label>
-      <form @submit="handleManualSeek">
-        <fieldset role="group">
-          <input v-model="manualSeekTime" name="seekTime" type="text" placeholder="00:00:00"
-            v-bind="isInvalid ? { 'aria-invalid': true } : {}" @input="handleManualSeekInput" />
-          <input type="submit" value="Seek" />
-        </fieldset>
-      </form>
-    </div>
-    <div ref="subtitleRef" class="subtitle" :style="[style, { 'display': currentSubtitle ? 'block' : 'none' }]">{{
-      currentSubtitle }}</div>
-
+    <button @click="centerizeSubtitle">center</button>
   </div>
 </template>
 
 <style scoped>
 .container {
+  display: flex;
+  max-width: 100%;
+  gap: 10px;
+  height: 100%;
+}
+
+p {
+  color: inherit;
+}
+
+.active-subtitle {
+  color: #fff;
+  transition: ease 0.1s all;
+}
+
+.overflow-subtitle {
+  font-size: 2rem;
+  transition: ease 0.1s all;
+  cursor: pointer;
+  color: #aaa;
+}
+
+.overflow-subtitle:hover {
+  color: #fff;
+}
+
+.sub-container {
+  padding: 2rem;
   width: 100%;
+  height: 100%;
   margin: 0 auto;
   display: flex;
   flex-direction: column;
   justify-content: center;
   align-items: center;
   text-align: center;
-  gap: 20px
+  gap: 20px;
+  background: #222;
+}
+
+.overflow-subtitle-container {
+  height: 100%;
+  overflow-y: scroll;
+  justify-content: flex-start;
 }
 
 .seek-bar-container {
@@ -221,7 +318,7 @@ const handleAudioEnded = (event: Event) => {
   border-radius: 10px;
 }
 
-.subtitle {
+.subtitle-container {
   position: absolute;
   margin-top: 10px;
   font-size: 1.2em;
@@ -231,6 +328,10 @@ const handleAudioEnded = (event: Event) => {
   display: inline-block;
   min-height: 2rem;
   cursor: grab;
+}
+
+.subtitle {
+  margin-bottom: 0px;
 }
 
 .audio-input,
