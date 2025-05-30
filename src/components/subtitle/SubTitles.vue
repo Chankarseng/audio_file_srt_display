@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useDraggable } from '@vueuse/core';
-import { useTemplateRef, defineProps } from 'vue';
+import { useTemplateRef } from 'vue';
 const subtitleRef = useTemplateRef<HTMLElement>('subtitleRef');
 const { style } = useDraggable(subtitleRef, {
   //@ts-expect-error: x position not initially passed in, as the position of the subtitle to be

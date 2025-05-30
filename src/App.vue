@@ -17,7 +17,7 @@ const appTitle = 'Subtitle Debugger';
 const audioRef = ref<HTMLAudioElement | null>(null);
 const subtitleOverflowRef = useTemplateRef<HTMLElement>('subtitleOverflowRef');
 const { isScrolling } = useScroll(subtitleOverflowRef);
-const activeRef = ref(null);
+const activeRef = ref<HTMLElement | null>(null);
 const isVisible = useElementVisibility(activeRef);
 const currentSubtitle = ref<string[]>([]);
 const playState = ref(false);
@@ -168,7 +168,8 @@ const centerizeSubtitle = () => {
     })
   }
 }
-const seekSubtitle = async (subtitle: Subtitle) => {
+const seekSubtitle = async (subtitle: Subtitle | undefined) => {
+  if (!subtitle) return
   const index = cues.value.indexOf(subtitle);
   if (audioRef.value) {
     audioRef.value.currentTime = subtitle.start;
@@ -221,9 +222,9 @@ const setActiveRef = (el: HTMLElement) => {
       <Subtitles :currentSubtitle="currentSubtitle" />
     </div>
     <div class="sub-container overflow-subtitle-container" ref="subtitleOverflowRef">
-      <div class="overflow-subtitle" v-for="(subtitle, index) in cues" :key="subtitle" @click="seekSubtitle(subtitle)"
-        :ref="index === activeSubtitleIndex ? setActiveRef : null">
-        <p :class="{ 'active-subtitle': index == activeSubtitleIndex }" v-for="text in subtitle.text" :key="text"> {{
+      <div class="overflow-subtitle" v-for="(subtitle, index) in cues" :key="index" @click="seekSubtitle(subtitle)"
+        :ref="(el) => { if (index === activeSubtitleIndex) setActiveRef(el as HTMLElement) }">
+        <p :class="{ 'active-subtitle': index == activeSubtitleIndex }" v-for="text in subtitle?.text" :key="text"> {{
           text }}</p>
       </div>
       <transition name="fade">

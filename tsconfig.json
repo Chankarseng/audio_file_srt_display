@@ -7,16 +7,5 @@
     {
       "path": "./tsconfig.app.json"
     }
-  ],
-  "compilerOptions": {
-    "baseUrl": ".", // project root
-    "paths": {
-      "~/*": [
-        "./*"
-      ], // resolves '~/utils' → './utils'
-      "@/*": [
-        "src/*"
-      ] // resolves '@/components' → 'src/components'
-    }
-  }
+  ]
 }

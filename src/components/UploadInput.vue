@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { defineProps } from 'vue';
 const { fileName, id, buttonText } = defineProps({
   fileName: String,
   id: String,
