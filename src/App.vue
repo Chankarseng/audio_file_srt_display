@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { onMounted, ref, useTemplateRef, onUnmounted } from 'vue';
-import { useDraggable, useScroll, useElementVisibility } from '@vueuse/core'
+import { useScroll, useElementVisibility } from '@vueuse/core';
+import { toSeconds, formatTime } from '~/utils/time.ts'
+import Subtitles from '@/components/subtitle/SubTitles.vue';
+import UploadInput from '@/components/UploadInput.vue';
 
 type Subtitle = {
   start: number;
@@ -10,8 +13,8 @@ type Subtitle = {
 
 type SubtitleList = (Subtitle | undefined)[];
 
+const appTitle = 'Subtitle Debugger';
 const audioRef = ref<HTMLAudioElement | null>(null);
-const subtitleRef = useTemplateRef<HTMLElement>('subtitleRef');
 const subtitleOverflowRef = useTemplateRef<HTMLElement>('subtitleOverflowRef');
 const { isScrolling } = useScroll(subtitleOverflowRef);
 const activeRef = ref(null);
@@ -27,11 +30,6 @@ const manualSeekTime = ref<string>('');
 const isInvalid = ref(false);
 const activeSubtitleIndex = ref(0);
 
-const { style } = useDraggable(subtitleRef, {
-  //@ts-expect-error: x position not initially passed in, as the position of the subtitle to be
-  //center via flex box
-  initialValue: { y: window.innerHeight - 200 },
-})
 
 function parseSubtitles(srtText: string) {
   const blocks = srtText.trim().split(/\n\s*\n/);
@@ -40,6 +38,7 @@ function parseSubtitles(srtText: string) {
     if (lines.length >= 3) {
       const time = lines[1].split(" --> ");
       return {
+        id: lines[0],
         start: toSeconds(time[0]),
         end: toSeconds(time[1]),
         text: lines.slice(2)  // Combine multiline subtitles
@@ -49,18 +48,6 @@ function parseSubtitles(srtText: string) {
   return subtitles
 }
 
-function toSeconds(timeString: string) {
-  const [h, m, s] = timeString.replace(',', '.').split(':').map(parseFloat);
-  return h * 3600 + m * 60 + s;
-}
-
-const formatTime = (seconds: number) => {
-  const hours = Math.floor(seconds / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  const secondsPart = Math.floor(seconds % 60);
-
-  return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secondsPart.toString().padStart(2, '0')}`;
-}
 
 const loadSubtitles = async (srtFile: string) => {
   const res = await fetch(srtFile);
@@ -86,6 +73,7 @@ onMounted(async () => {
   }
   document.addEventListener('keydown', handleKeyDown);
 });
+
 const handleKeyDown = (event: KeyboardEvent) => {
   if (event.code === 'Space') {
     event.preventDefault(); // Prevent default spacebar behavior (scrolling)
@@ -95,7 +83,9 @@ const handleKeyDown = (event: KeyboardEvent) => {
 
 onUnmounted(() => {
   document.removeEventListener('keydown', handleKeyDown);
+  audioRef.value?.removeEventListener('timeupdate', () => { });
 });
+
 const togglePlay = () => {
   if (audioRef.value) {
     playState.value = !playState.value;
@@ -158,6 +148,7 @@ const handleSrtFileInput = (event: Event) => {
   loadSubtitles(URL.createObjectURL(file))
   srtFileName.value = file.name;
 }
+
 const handleAudioEnded = () => {
   if (audioRef.value) {
     const audio = audioRef.value;
@@ -196,21 +187,19 @@ const setActiveRef = (el: HTMLElement) => {
 
 <template>
   <div class="container">
-    {{ activeSubtitleIndex }}
     <div class="sub-container">
-      <h1>Mp3 audio file and SRT debugger</h1>
+      <h1>{{ appTitle }}</h1>
       <audio ref="audioRef" :src="audioSrc" @ended="handleAudioEnded"></audio>
-      <button :disabled="!audioSrc" @click="togglePlay">{{ playState ? 'Pause' : 'Play' }}</button>
+      <button class="pi-play" :disabled="!audioSrc" @click="togglePlay">{{ playState ? 'Pause' : 'Play'
+        }}</button>
       <div class="input-container">
         <div>
-          <input type="file" accept="audio/*" class="audio-input" id="audio-input" @change="handleAudioFileInput" />
-          <label class="audio-input-label" for="audio-input">Load MP3 file</label>
-          <div v-if="audioFileName">{{ audioFileName }}</div>
+          <UploadInput :fileName="audioFileName" id="audioFile" @handleFileUpload="handleAudioFileInput"
+            buttonText="Load Mp3 File" accept="audio/*" />
         </div>
         <div>
-          <input type="file" accept=".srt" class="srt-input" id="srt-input" @change="handleSrtFileInput" />
-          <label class="audio-input-label" for="srt-input">Load SRT file</label>
-          <div v-if="srtFileName">{{ srtFileName }}</div>
+          <UploadInput :fileName="srtFileName" id="srtFile" @handleFileUpload="handleSrtFileInput"
+            buttonText="Load SRT file" accept=".srt" />
         </div>
       </div>
       <div class="seek-bar-container">
@@ -229,10 +218,7 @@ const setActiveRef = (el: HTMLElement) => {
           </fieldset>
         </form>
       </div>
-      <div ref="subtitleRef" class="subtitle-container"
-        :style="[style, { 'display': currentSubtitle.length > 0 ? 'block' : 'none' }]">
-        <p class="subtitle" v-for="subtitle in currentSubtitle" :key="subtitle">{{ subtitle }}</p>
-      </div>
+      <Subtitles :currentSubtitle="currentSubtitle" />
     </div>
     <div class="sub-container overflow-subtitle-container" ref="subtitleOverflowRef">
       <div class="overflow-subtitle" v-for="(subtitle, index) in cues" :key="subtitle" @click="seekSubtitle(subtitle)"
@@ -240,8 +226,10 @@ const setActiveRef = (el: HTMLElement) => {
         <p :class="{ 'active-subtitle': index == activeSubtitleIndex }" v-for="text in subtitle.text" :key="text"> {{
           text }}</p>
       </div>
+      <transition name="fade">
+        <button v-show="!isVisible" class="center-button" @click="centerizeSubtitle">center</button>
+      </transition>
     </div>
-    <button @click="centerizeSubtitle">center</button>
   </div>
 </template>
 
@@ -257,6 +245,21 @@ p {
   color: inherit;
 }
 
+.center-button {
+  position: absolute;
+  bottom: 10%;
+}
+
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.2s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
 .active-subtitle {
   color: #fff;
   transition: ease 0.1s all;
@@ -266,7 +269,7 @@ p {
   font-size: 2rem;
   transition: ease 0.1s all;
   cursor: pointer;
-  color: #aaa;
+  color: #777;
 }
 
 .overflow-subtitle:hover {
@@ -316,41 +319,6 @@ p {
   height: 100%;
   background: #0077ff;
   border-radius: 10px;
-}
-
-.subtitle-container {
-  position: absolute;
-  margin-top: 10px;
-  font-size: 1.2em;
-  background: rgba(0, 0, 0, 0.7);
-  color: white;
-  padding: 5px 10px;
-  display: inline-block;
-  min-height: 2rem;
-  cursor: grab;
-}
-
-.subtitle {
-  margin-bottom: 0px;
-}
-
-.audio-input,
-.srt-input {
-  width: 0.1px;
-  height: 0.1px;
-  opacity: 0;
-  overflow: hidden;
-  position: absolute;
-  z-index: -1;
-}
-
-.audio-input-label {
-  cursor: pointer;
-  background: #0077ff;
-  padding: 10px;
-  border-radius: 10px;
-  color: #fff;
-  font-size: 1.2em;
 }
 
 .input-container {
